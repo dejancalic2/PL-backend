@@ -36,9 +36,8 @@ function startHealthCheck() {
       console.log('💚 Health check: Baza podataka OK');
     } catch (error) {
       console.error('💔 Health check: Problem sa bazom podataka:', error.message);
-      // Pokušaj ponovnog povezivanja
+      // NE zatvaraj connection pool, samo pokušaj ponovno povezivanje
       try {
-        await sequelize.close();
         await sequelize.authenticate();
         console.log('🔄 Konekcija sa bazom obnovljena');
       } catch (reconnectError) {

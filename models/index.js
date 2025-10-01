@@ -6,6 +6,22 @@ const ReservationModel = require('./Reservation');
 const NotificationModel = require('./Notification');
 const NonWorkingDayModel = require('./NonWorkingDay');
 
+// Provera da li su svi environment varijabli postavljeni
+const requiredEnvVars = ['MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_HOST'];
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingEnvVars.length > 0) {
+  console.error('❌ Nedostaju environment varijable:', missingEnvVars.join(', '));
+  console.error('📝 Proverite .env fajl ili Render Environment Variables');
+}
+
+console.log('🔧 MySQL konfiguracija:');
+console.log(`   Host: ${process.env.MYSQL_HOST}`);
+console.log(`   Port: ${process.env.MYSQL_PORT || 3306}`);
+console.log(`   Database: ${process.env.MYSQL_DATABASE}`);
+console.log(`   User: ${process.env.MYSQL_USER}`);
+console.log(`   SSL:Enabled`);
+
 const sequelize = new Sequelize(
   process.env.MYSQL_DATABASE,
   process.env.MYSQL_USER,
@@ -14,7 +30,7 @@ const sequelize = new Sequelize(
     host: process.env.MYSQL_HOST,
     port: process.env.MYSQL_PORT || 3306,
     dialect: 'mysql',
-    logging: false,
+    logging: console.log, // Prikaži SQL upite za debugging
     pool: {
       max: 5,
       min: 0,
