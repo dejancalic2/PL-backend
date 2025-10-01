@@ -65,18 +65,19 @@ router.post('/register', async (req, res) => {
 		};
 		
 		const user = await User.create(userData);
-        // Send verification email via Mailjet
+        // Send verification email via Gmail SMTP
         const transporter = nodemailer.createTransport({
-            host: 'in-v3.mailjet.com',
+            host: 'smtp.gmail.com',
             port: 587,
+            secure: false, // true for 465, false for other ports
             auth: {
-                user: process.env.MAILJET_API_KEY,
-                pass: process.env.MAILJET_SECRET_KEY
+                user: process.env.GMAIL_USER,
+                pass: process.env.GMAIL_APP_PASSWORD
             }
         });
         
         const mailOptions = {
-            from: process.env.MAIL_FROM_EMAIL || 'noreply@playgroundapp.com',
+            from: process.env.GMAIL_USER,
             to: email,
             subject: 'Verifikacija naloga - Playground App',
             html: `
@@ -99,7 +100,7 @@ router.post('/register', async (req, res) => {
             if (error) {
                 console.error('❌ Greška pri slanju verifikacionog emaila:', error);
             } else {
-                console.log('✅ Verifikacioni email poslat preko Mailjet:', info.response);
+                console.log('✅ Verifikacioni email poslat preko Gmail:', info.response);
             }
         });
 		res.status(201).json({ message: 'Verifikacioni kod je poslat na email. Unesite kod da biste završili registraciju.' });
