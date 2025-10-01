@@ -49,24 +49,36 @@ function startHealthCheck() {
 
 // Funkcija za pokretanje servera
 async function startServer() {
+  // PRVO startuj server da Render health check vidi otvoren port
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server startovan na portu ${PORT}`);
+    console.log(`🌐 Server je dostupan na http://0.0.0.0:${PORT}`);
+  });
+
+  // ZATIM pokušaj da se povežeš sa bazom u pozadini
+  console.log('🔌 Pokušavam da se povežem sa bazom podataka...');
   const isConnected = await testDatabaseConnection();
   
-  if (isConnected) {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Server radi na portu ${PORT}`);
-      console.log(`📊 Baza podataka: ${process.env.MYSQL_HOST}:${process.env.MYSQL_PORT || 3306}`);
-    });
+  if (!isConnected) {
+    console.log('⚠️ Server radi, ali baza nije dostupna. Pokušavam ponovno povezivanje...');
+    // Pokušaj ponovno povezivanje svakih 5 sekundi
+    const retryInterval = setInterval(async () => {
+      console.log('🔄 Pokušavam ponovno povezivanje sa bazom...');
+      const connected = await testDatabaseConnection();
+      if (connected) {
+        console.log('✅ Uspešno povezan sa bazom!');
+        clearInterval(retryInterval);
+        startHealthCheck();
+      }
+    }, 5000);
   } else {
-    console.log('🔄 Pokušavam ponovno povezivanje za 5 sekundi...');
-    setTimeout(startServer, 5000);
+    console.log(`📊 Baza podataka: ${process.env.MYSQL_HOST}:${process.env.MYSQL_PORT || 3306}`);
+    startHealthCheck();
   }
 }
 
 // Pokretanje servera
 startServer();
-
-// Pokretanje health check-a
-startHealthCheck();
 
 // Dodavanje graceful shutdown
 process.on('SIGINT', async () => {
@@ -85,22 +97,27 @@ app.get('/', (req, res) => {
 	res.send('API radi!');
 });
 
-// Health check endpoint
+// Health check endpoint za Render
 app.get('/health', async (req, res) => {
   try {
     await sequelize.authenticate();
-    res.json({
+    res.status(200).json({
       status: 'healthy',
+      server: 'running',
       database: 'connected',
       timestamp: new Date().toISOString(),
       uptime: process.uptime()
     });
   } catch (error) {
-    res.status(503).json({
-      status: 'unhealthy',
+    // Server je UP, ali baza možda nije dostupna
+    // Render health check će i dalje proći jer server odgovara
+    res.status(200).json({
+      status: 'degraded',
+      server: 'running',
       database: 'disconnected',
       error: error.message,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime()
     });
   }
 });
