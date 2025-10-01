@@ -65,26 +65,41 @@ router.post('/register', async (req, res) => {
 		};
 		
 		const user = await User.create(userData);
-        // Send verification email
+        // Send verification email via Mailjet
         const transporter = nodemailer.createTransport({
-            host: process.env.MAIL_HOST,
-            port: process.env.MAIL_PORT,
+            host: 'in-v3.mailjet.com',
+            port: 587,
             auth: {
-                user: process.env.MAIL_USERNAME,
-                pass: process.env.MAIL_PASSWORD
+                user: process.env.MAILJET_API_KEY,
+                pass: process.env.MAILJET_SECRET_KEY
             }
         });
+        
         const mailOptions = {
-            from: process.env.MAIL_FROM_EMAIL,
+            from: process.env.MAIL_FROM_EMAIL || 'noreply@playgroundapp.com',
             to: email,
-            subject: 'Verifikacija naloga',
-            text: `Vaš verifikacioni kod je: ${verificationCode}`
+            subject: 'Verifikacija naloga - Playground App',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #333;">Dobrodošli u Playground App!</h2>
+                    <p>Hvala vam što ste se registrovali. Da biste aktivirali nalog, unesite sledeći verifikacioni kod:</p>
+                    <div style="background-color: #f4f4f4; padding: 20px; text-align: center; margin: 20px 0;">
+                        <h1 style="color: #007bff; font-size: 32px; margin: 0;">${verificationCode}</h1>
+                    </div>
+                    <p>Ovaj kod je važeći 24 sata.</p>
+                    <p>Ako niste zatražili ovaj kod, ignorišite ovaj email.</p>
+                    <hr style="margin: 30px 0;">
+                    <p style="color: #666; font-size: 12px;">Playground App - Rezervacija igrališta</p>
+                </div>
+            `,
+            text: `Vaš verifikacioni kod je: ${verificationCode}\n\nOvaj kod je važeći 24 sata.\n\nAko niste zatražili ovaj kod, ignorišite ovaj email.`
         };
+        
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
-                console.error('Greška pri slanju verifikacionog emaila:', error);
+                console.error('❌ Greška pri slanju verifikacionog emaila:', error);
             } else {
-                console.log('Verifikacioni email poslat:', info.response);
+                console.log('✅ Verifikacioni email poslat preko Mailjet:', info.response);
             }
         });
 		res.status(201).json({ message: 'Verifikacioni kod je poslat na email. Unesite kod da biste završili registraciju.' });
