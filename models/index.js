@@ -45,7 +45,9 @@ const sequelize = new Sequelize(
     dialectOptions: {
       connectTimeout: 60000,
       ssl: {
-        rejectUnauthorized: true
+        // Dozvoljava self-signed sertifikate (Aiven free plan)
+        // Konekcija je i dalje enkriptovana
+        rejectUnauthorized: false
       }
     }
   }
