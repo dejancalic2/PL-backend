@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 const auth = require('../middleware/auth');
-const nodemailer = require('nodemailer');
+const mailjet = require('node-mailjet');
 
 const router = express.Router();
 
@@ -65,44 +65,64 @@ router.post('/register', async (req, res) => {
 		};
 		
 		const user = await User.create(userData);
-        // Send verification email via Gmail SMTP
-        const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 587,
-            secure: false, // true for 465, false for other ports
-            auth: {
-                user: process.env.GMAIL_USER,
-                pass: process.env.GMAIL_APP_PASSWORD
-            }
-        });
+        // Send verification email via Mailjet API
+        console.log('📧 Mailjet Configuration:');
+        console.log(`API Key: ${process.env.MAILJET_API_KEY ? '***DEFINED***' : 'NOT DEFINED'}`);
+        console.log(`Secret Key: ${process.env.MAILJET_SECRET_KEY ? '***DEFINED***' : 'NOT DEFINED'}`);
         
-        const mailOptions = {
-            from: process.env.GMAIL_USER,
-            to: email,
-            subject: 'Verifikacija naloga - Playground App',
-            html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                    <h2 style="color: #333;">Dobrodošli u Playground App!</h2>
-                    <p>Hvala vam što ste se registrovali. Da biste aktivirali nalog, unesite sledeći verifikacioni kod:</p>
-                    <div style="background-color: #f4f4f4; padding: 20px; text-align: center; margin: 20px 0;">
-                        <h1 style="color: #007bff; font-size: 32px; margin: 0;">${verificationCode}</h1>
-                    </div>
-                    <p>Ovaj kod je važeći 24 sata.</p>
-                    <p>Ako niste zatražili ovaj kod, ignorišite ovaj email.</p>
-                    <hr style="margin: 30px 0;">
-                    <p style="color: #666; font-size: 12px;">Playground App - Rezervacija igrališta</p>
-                </div>
-            `,
-            text: `Vaš verifikacioni kod je: ${verificationCode}\n\nOvaj kod je važeći 24 sata.\n\nAko niste zatražili ovaj kod, ignorišite ovaj email.`
+        const client = mailjet.apiConnect(
+            process.env.MAILJET_API_KEY,
+            process.env.MAILJET_SECRET_KEY
+        );
+        
+        const emailData = {
+            Messages: [
+                {
+                    From: {
+                        Email: process.env.MAIL_FROM_EMAIL || 'termino@playgroundapp.com',
+                        Name: 'Termino - Playground App'
+                    },
+                    To: [
+                        {
+                            Email: email,
+                            Name: name
+                        }
+                    ],
+                    Subject: 'Verifikacija naloga - Playground App',
+                    HTMLPart: `
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                            <h2 style="color: #333;">Dobrodošli u Playground App!</h2>
+                            <p>Hvala vam što ste se registrovali. Da biste aktivirali nalog, unesite sledeći verifikacioni kod:</p>
+                            <div style="background-color: #f4f4f4; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px;">
+                                <h1 style="color: #007bff; font-size: 32px; margin: 0;">${verificationCode}</h1>
+                                <p style="margin: 10px 0 0 0; color: #666;">Verifikacioni kod</p>
+                            </div>
+                            <p>Ovaj kod je važeći 24 sata.</p>
+                            <p>Ako niste zatražili ovaj kod, ignorišite ovaj email.</p>
+                            <hr style="margin: 30px 0;">
+                            <p style="color: #666; font-size: 12px;">Termino - Playground App - Rezervacija igrališta</p>
+                        </div>
+                    `,
+                    TextPart: `Vaš verifikacioni kod je: ${verificationCode}\n\nOvaj kod je važeći 24 sata.\n\nAko niste zatražili ovaj kod, ignorišite ovaj email.`
+                }
+            ]
         };
         
-        transporter.sendMail(mailOptions, (error, info) => {
-            if (error) {
-                console.error('❌ Greška pri slanju verifikacionog emaila:', error);
-            } else {
-                console.log('✅ Verifikacioni email poslat preko Gmail:', info.response);
-            }
-        });
+        console.log('📤 Attempting to send email via Mailjet...');
+        console.log(`To: ${email}`);
+        console.log(`From: ${process.env.MAIL_FROM_EMAIL || 'termino@playgroundapp.com'}`);
+        console.log(`Subject: Verifikacija naloga - Playground App`);
+        
+        try {
+            const result = await client.post('send', { version: 'v3.1' }).request(emailData);
+            console.log('✅ Verifikacioni email poslat uspešno!');
+            console.log('Message ID:', result.body.Messages[0].To[0].MessageID);
+            console.log('Status:', result.body.Messages[0].Status);
+        } catch (error) {
+            console.error('❌ Greška pri slanju verifikacionog emaila:');
+            console.error('Error message:', error.message);
+            console.error('Full error:', error);
+        }
 		res.status(201).json({ message: 'Verifikacioni kod je poslat na email. Unesite kod da biste završili registraciju.' });
 	} catch (err) {
 		console.error('REGISTER ERROR:', err); // <--- DODAJ OVO
