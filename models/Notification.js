@@ -5,7 +5,8 @@ module.exports = (sequelize) => {
     ownerId: { type: DataTypes.INTEGER, allowNull: false },
     message: { type: DataTypes.STRING, allowNull: false },
     seen: { type: DataTypes.BOOLEAN, defaultValue: false },
-    reservationId: { type: DataTypes.INTEGER, allowNull: true, references: { model: 'Reservations', key: 'id' } }
+    reservationId: { type: DataTypes.INTEGER, allowNull: true, references: { model: 'Reservations', key: 'id' } },
+    isDeleted: { type: DataTypes.BOOLEAN, defaultValue: false }
   }, {
     timestamps: true,
   });

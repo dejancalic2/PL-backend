@@ -17,6 +17,10 @@ module.exports = (sequelize) => {
     latitude: { type: DataTypes.FLOAT }, // geografska širina
     longitude: { type: DataTypes.FLOAT }, // geografska dužina
     phone: { type: DataTypes.STRING }, // kontakt telefon igraonice
+    numberOfAnimators: { type: DataTypes.INTEGER, defaultValue: 1 }, // broj animatorki (1, 2, ili 3)
+    allowOwnFood: { type: DataTypes.BOOLEAN, defaultValue: false }, // da li korisnici mogu doneti svoju hranu
+    allowOwnDrinks: { type: DataTypes.BOOLEAN, defaultValue: false }, // da li korisnici mogu doneti svoja pića
+    offerings: { type: DataTypes.TEXT, allowNull: true }, // šta igraonica nudi (hrana, pića, usluge...)
   }, {
     timestamps: true,
   });

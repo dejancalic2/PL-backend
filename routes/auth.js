@@ -7,6 +7,43 @@ const mailjet = require('node-mailjet');
 
 const router = express.Router();
 
+// Endpoint za čuvanje OneSignal player ID-a
+router.post('/save-player-id', auth, async (req, res) => {
+  try {
+    const { playerId } = req.body;
+    
+    if (!playerId) {
+      return res.status(400).json({ message: 'Player ID je obavezan.' });
+    }
+    
+    await User.update(
+      { playerId: playerId },
+      { where: { id: req.user.id } }
+    );
+    
+    console.log(`✅ OneSignal Player ID sačuvan za korisnika ${req.user.id}: ${playerId}`);
+    res.json({ message: 'Player ID je uspešno sačuvan.' });
+  } catch (error) {
+    console.error('❌ Greška pri čuvanju Player ID-a:', error);
+    res.status(500).json({ message: 'Greška na serveru.' });
+  }
+});
+
+// Endpoint za proveru player ID-a
+router.get('/check-player-id', auth, async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.id);
+    res.json({ 
+      userId: user.id,
+      playerId: user.playerId,
+      hasPlayerId: !!user.playerId
+    });
+  } catch (error) {
+    console.error('❌ Greška pri proveri Player ID-a:', error);
+    res.status(500).json({ message: 'Greška na serveru.' });
+  }
+});
+
 
 
 

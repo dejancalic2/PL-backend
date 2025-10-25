@@ -1,5 +1,5 @@
 const express = require('express');
-const { NonWorkingDay, Playground, Slot } = require('../models');
+const { NonWorkingDay, Playground, Slot, Reservation, User } = require('../models');
 const auth = require('../middleware/auth');
 
 const router = express.Router();
@@ -42,6 +42,45 @@ router.post('/', auth, async (req, res) => {
     });
     if (existingNonWorkingDay) {
       return res.status(400).json({ message: 'Već postoji neradan dan za ovaj datum.' });
+    }
+
+    // NOVA PROVERA: Da li postoje aktivne rezervacije za taj datum?
+    const slotsForDate = await Slot.findAll({
+      where: { playgroundId, date }
+    });
+    
+    if (slotsForDate.length > 0) {
+      const slotIds = slotsForDate.map(s => s.id);
+      
+      // Proveri da li postoje rezervacije (pending ili approved, NE odbijene)
+      const existingReservations = await Reservation.findAll({
+        where: {
+          slotId: slotIds,
+          status: ['pending', 'approved'],
+          isDeleted: false
+        },
+        include: [
+          { model: Slot, as: 'slot' },
+          { model: User, as: 'user', attributes: ['name', 'email', 'phone'] }
+        ]
+      });
+
+      if (existingReservations.length > 0) {
+        // Postoje aktivne rezervacije - NE DOZVOLI dodavanje neradnog dana
+        const reservationDetails = existingReservations.map(r => ({
+          userName: r.user.name,
+          userEmail: r.user.email,
+          userPhone: r.user.phone,
+          timeFrom: r.slot.timeFrom,
+          timeTo: r.slot.timeTo,
+          status: r.status
+        }));
+
+        return res.status(400).json({ 
+          message: `Ne možete dodati neradan dan jer postoje ${existingReservations.length} aktivne rezervacije za ${date}.`,
+          reservations: reservationDetails
+        });
+      }
     }
 
     // Kreiraj neradan dan
@@ -104,6 +143,43 @@ router.put('/:id', auth, async (req, res) => {
       
       if (existing) {
         return res.status(400).json({ message: 'Već postoji neradni dan za izabrani datum.' });
+      }
+
+      // NOVA PROVERA: Da li postoje aktivne rezervacije za novi datum?
+      const slotsForDate = await Slot.findAll({
+        where: { playgroundId: nonWorkingDay.playgroundId, date: date }
+      });
+      
+      if (slotsForDate.length > 0) {
+        const slotIds = slotsForDate.map(s => s.id);
+        
+        const existingReservations = await Reservation.findAll({
+          where: {
+            slotId: slotIds,
+            status: ['pending', 'approved'],
+            isDeleted: false
+          },
+          include: [
+            { model: Slot, as: 'slot' },
+            { model: User, as: 'user', attributes: ['name', 'email', 'phone'] }
+          ]
+        });
+
+        if (existingReservations.length > 0) {
+          const reservationDetails = existingReservations.map(r => ({
+            userName: r.user.name,
+            userEmail: r.user.email,
+            userPhone: r.user.phone,
+            timeFrom: r.slot.timeFrom,
+            timeTo: r.slot.timeTo,
+            status: r.status
+          }));
+
+          return res.status(400).json({ 
+            message: `Ne možete promeniti na datum ${date} jer postoje ${existingReservations.length} aktivne rezervacije.`,
+            reservations: reservationDetails
+          });
+        }
       }
     }
 

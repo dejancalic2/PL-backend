@@ -6,6 +6,62 @@ const axios = require('axios');
 
 const router = express.Router();
 
+// Helper funkcija za Mailjet klijent (sa error handlingom)
+function getMailjetClient() {
+  const apiKey = process.env.MAILJET_API_KEY;
+  const secretKey = process.env.MAILJET_SECRET_KEY;
+  
+  if (!apiKey || !secretKey) {
+    console.error('❌ MAILJET kredencijali nisu postavljeni u environment varijablama!');
+    console.error('   MAILJET_API_KEY:', apiKey ? '✅ SET' : '❌ NOT SET');
+    console.error('   MAILJET_SECRET_KEY:', secretKey ? '✅ SET' : '❌ NOT SET');
+    return null;
+  }
+  
+  try {
+    return mailjet.apiConnect(apiKey, secretKey);
+  } catch (error) {
+    console.error('❌ Greška pri kreiranju Mailjet klijenta:', error.message);
+    return null;
+  }
+}
+
+// Helper funkcija za OneSignal push notifikacije
+async function sendOneSignalNotification(playerId, title, message, data = {}) {
+  try {
+    const oneSignalAppId = '5d2d5ab6-d3a1-4abf-8dbd-12fae350ce4f';
+    // OneSignal REST API Key
+    const oneSignalApiKey = 'os_v2_app_luwvvnwtuffl7dn5cl5ogugoj7jbtdgjiwme7fmt6ogj7fqeksjupogqugnuzn24m6d3t2pgsorxshuvnjc2k3p52yo243gjogbgysy';
+    
+    if (!oneSignalApiKey) {
+      console.error('❌ OneSignal REST API Key nije postavljen!');
+      return false;
+    }
+    
+    const response = await axios.post('https://onesignal.com/api/v1/notifications', {
+      app_id: oneSignalAppId,
+      include_player_ids: [playerId],
+      headings: { en: title },
+      contents: { en: message },
+      data: data
+    }, {
+      headers: {
+        'Authorization': `Basic ${oneSignalApiKey}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('✅ OneSignal notifikacija poslata:', response.data);
+    return true;
+  } catch (error) {
+    console.error('❌ Greška pri slanju OneSignal notifikacije:');
+    console.error('   Error message:', error.message);
+    console.error('   Error response:', error.response?.data);
+    console.error('   Error status:', error.response?.status);
+    return false;
+  }
+}
+
 // Rezervacija termina (korisnik ili vlasnik)
 router.post('/:slotId', auth, async (req, res) => {
   const slot = await Slot.findByPk(req.params.slotId);
@@ -18,18 +74,24 @@ router.post('/:slotId', auth, async (req, res) => {
   await slot.save();
   
   // Kreiraj rezervaciju sa statusom 'pending'
-  const reservation = await Reservation.create({ userId: req.user.id, slotId: slot.id, note: req.body.note, status: 'pending' });
+  const reservation = await Reservation.create({ 
+    userId: req.user.id, 
+    slotId: slot.id, 
+    note: req.body.note, 
+    numberOfAnimators: req.body.numberOfAnimators || 1, // Broj animatorki (default: 1)
+    status: 'pending' 
+  });
 
   // Pronađi korisnika i vlasnika
   const user = await User.findByPk(req.user.id);
   const playground = await Playground.findByPk(slot.playgroundId, { include: [{ model: User, as: 'owner' }] });
   const owner = playground.owner;
+  
+  console.log(`🔍 User ID: ${user.id}, Player ID: ${user.playerId}`);
+  console.log(`🔍 Owner ID: ${owner.id}, Player ID: ${owner.playerId}`);
 
   // Slanje emaila vlasniku preko Mailjet
-  const client = mailjet.apiConnect(
-    process.env.MAILJET_API_KEY,
-    process.env.MAILJET_SECRET_KEY
-  );
+  const client = getMailjetClient();
   
   const emailData = {
     Messages: [
@@ -68,12 +130,42 @@ router.post('/:slotId', auth, async (req, res) => {
     ]
   };
   
-  try {
-    const result = await client.post('send', { version: 'v3.1' }).request(emailData);
-    console.log('✅ Email vlasniku poslat uspešno!');
-    console.log('Message ID:', result.body.Messages[0].To[0].MessageID);
-  } catch (error) {
-    console.error('❌ Greška pri slanju emaila vlasniku:', error);
+  if (client) {
+    try {
+      const result = await client.post('send', { version: 'v3.1' }).request(emailData);
+      console.log('✅ Email vlasniku poslat uspešno!');
+      console.log('Message ID:', result.body.Messages[0].To[0].MessageID);
+    } catch (error) {
+      console.error('❌ Greška pri slanju emaila vlasniku:', error);
+    }
+  } else {
+    console.error('⚠️ Mailjet klijent nije dostupan - email nije poslat');
+  }
+
+  // Pošalji OneSignal push notifikaciju owner-u
+  console.log(`🔍 Owner ID: ${owner.id}, Player ID: ${owner.playerId || 'NEMA'}`);
+  if (owner.playerId) {
+    const title = 'Nova rezervacija termina';
+    const message = `${user.name} je rezervisao termin za ${slot.date} od ${slot.timeFrom}-${slot.timeTo}`;
+    const data = {
+      reservationId: reservation.id,
+      playgroundId: playground.id,
+      slotId: slot.id,
+      type: 'new_reservation'
+    };
+    
+    console.log(`📱 Šaljem OneSignal notifikaciju owner-u: ${owner.playerId}`);
+    console.log(`   Title: ${title}`);
+    console.log(`   Message: ${message}`);
+    try {
+      await sendOneSignalNotification(owner.playerId, title, message, data);
+      console.log('✅ OneSignal notifikacija owner-u poslata uspešno');
+    } catch (error) {
+      console.error('❌ Greška pri slanju OneSignal notifikacije owner-u:', error);
+    }
+  } else {
+    console.log('⚠️ Owner nema playerId - push notifikacija nije poslata');
+    console.log('💡 Owner mora da se uloguje u aplikaciju da bi dobio playerId');
   }
 
   // Upis notifikacije u bazu
@@ -83,19 +175,7 @@ router.post('/:slotId', auth, async (req, res) => {
     reservationId: reservation.id
   });
 
-  // OneSignal notifikacija
-  if (owner.playerId) {
-    await axios.post('https://onesignal.com/api/v1/notifications', {
-      app_id: process.env.ONESIGNAL_APP_ID,
-      include_player_ids: [owner.playerId],
-      contents: { en: `Nova rezervacija (čeka potvrdu): ${user.name} (${user.email}${user.phone ? ', tel: ' + user.phone : ''}) za ${slot.date} ${slot.timeFrom}h-${slot.timeTo}h u ${playground.name}.` }
-    }, {
-      headers: {
-        'Authorization': `Basic ${process.env.ONESIGNAL_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
-  }
+  // Duplikat OneSignal poziva je uklonjen - koristi se samo sendOneSignalNotification funkcija iznad
 
   res.status(201).json(reservation);
 });
@@ -116,73 +196,76 @@ router.post('/confirm/:reservationId', auth, async (req, res) => {
     return res.status(403).json({ message: 'Niste vlasnik ove igraonice.' });
   }
   const user = await User.findByPk(reservation.userId);
-const client = mailjet.apiConnect(
-    process.env.MAILJET_API_KEY,
-    process.env.MAILJET_SECRET_KEY
-  );
+  const client = getMailjetClient();
+  
   if (action === 'approve') {
     reservation.status = 'approved';
     slot.isReserved = true;
     slot.isTemporarilyReserved = false; // Ukloni privremenu rezervaciju
     await slot.save();
     // Pošalji email korisniku
-    try {
-      const emailData = {
-        Messages: [
-          {
-            From: {
-              Email: process.env.MAIL_FROM_EMAIL || 'termino@playgroundapp.com',
-              Name: 'Termino - Playground App'
-            },
-            To: [
-              {
-                Email: user.email,
-                Name: user.name
-              }
-            ],
-            Subject: 'Rezervacija potvrđena',
-            HTMLPart: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #28a745;">🎉 Rezervacija potvrđena!</h2>
-                <p>Vaša rezervacija je uspešno potvrđena.</p>
-                <div style="background-color: #d4edda; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #28a745;">
-                  <h3 style="color: #155724; margin-top: 0;">Detalji rezervacije:</h3>
-                  <p><strong>Datum:</strong> ${slot.date}</p>
-                  <p><strong>Vreme:</strong> ${slot.timeFrom} - ${slot.timeTo}</p>
-                  <p><strong>Igraonica:</strong> ${playground.name}</p>
+    if (client) {
+      try {
+        const emailData = {
+          Messages: [
+            {
+              From: {
+                Email: process.env.MAIL_FROM_EMAIL || 'termino@playgroundapp.com',
+                Name: 'Termino - Playground App'
+              },
+              To: [
+                {
+                  Email: user.email,
+                  Name: user.name
+                }
+              ],
+              Subject: 'Rezervacija potvrđena',
+              HTMLPart: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                  <h2 style="color: #28a745;">🎉 Rezervacija potvrđena!</h2>
+                  <p>Vaša rezervacija je uspešno potvrđena.</p>
+                  <div style="background-color: #d4edda; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #28a745;">
+                    <h3 style="color: #155724; margin-top: 0;">Detalji rezervacije:</h3>
+                    <p><strong>Datum:</strong> ${slot.date}</p>
+                    <p><strong>Vreme:</strong> ${slot.timeFrom} - ${slot.timeTo}</p>
+                    <p><strong>Igraonica:</strong> ${playground.name}</p>
+                  </div>
+                  <p>Vidimo se na terminu! 🏀</p>
+                  <hr style="margin: 30px 0;">
+                  <p style="color: #666; font-size: 12px;">Termino - Playground App</p>
                 </div>
-                <p>Vidimo se na terminu! 🏀</p>
-                <hr style="margin: 30px 0;">
-                <p style="color: #666; font-size: 12px;">Termino - Playground App</p>
-              </div>
-            `,
-            TextPart: `Vaša rezervacija termina za ${slot.date} od ${slot.timeFrom}h do ${slot.timeTo}h u igraonici ${playground.name} je ODOBRENA.`
-          }
-        ]
+              `,
+              TextPart: `Vaša rezervacija termina za ${slot.date} od ${slot.timeFrom}h do ${slot.timeTo}h u igraonici ${playground.name} je ODOBRENA.`
+            }
+          ]
+        };
+        
+        const result = await client.post('send', { version: 'v3.1' }).request(emailData);
+        console.log('✅ Email korisniku poslat uspešno!');
+        console.log('Message ID:', result.body.Messages[0].To[0].MessageID);
+      } catch (error) {
+        console.error('❌ Greška pri slanju emaila korisniku:', error);
+      }
+    } else {
+      console.error('⚠️ Mailjet klijent nije dostupan - email nije poslat korisniku');
+    }
+    // Pošalji OneSignal push notifikaciju korisniku
+    console.log(`🔍 User PlayerID: ${user.playerId || 'NEMA'}`);
+    if (user.playerId) {
+      const title = 'Rezervacija potvrđena';
+      const message = `Vaša rezervacija za ${slot.date} od ${slot.timeFrom}-${slot.timeTo} u ${playground.name} je ODOBRENA!`;
+      const data = {
+        reservationId: reservation.id,
+        playgroundId: playground.id,
+        slotId: slot.id,
+        type: 'reservation_approved'
       };
       
-      const result = await client.post('send', { version: 'v3.1' }).request(emailData);
-      console.log('✅ Email korisniku poslat uspešno!');
-      console.log('Message ID:', result.body.Messages[0].To[0].MessageID);
-    } catch (error) {
-      console.error('❌ Greška pri slanju emaila korisniku:', error);
-    }
-    // OneSignal push korisniku
-    if (user.playerId) {
-      try {
-        await axios.post('https://onesignal.com/api/v1/notifications', {
-          app_id: process.env.ONESIGNAL_APP_ID,
-          include_player_ids: [user.playerId],
-          contents: { en: `Vaša rezervacija za ${slot.date} ${slot.timeFrom}h-${slot.timeTo}h u ${playground.name} je ODOBRENA.` }
-        }, {
-          headers: {
-            'Authorization': `Basic ${process.env.ONESIGNAL_API_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        });
-      } catch (error) {
-        console.error('Greška pri slanju push notifikacije korisniku:', error);
-      }
+      console.log(`📱 Šaljem OneSignal notifikaciju korisniku: ${user.playerId}`);
+      await sendOneSignalNotification(user.playerId, title, message, data);
+    } else {
+      console.log('⚠️ User nema playerId - push notifikacija nije poslata');
+      console.log('💡 Korisnik mora da se uloguje u aplikaciju da bi dobio playerId');
     }
     // Ažuriraj originalnu notifikaciju vlasnika
     await Notification.update(
@@ -204,63 +287,68 @@ const client = mailjet.apiConnect(
     slot.isTemporarilyReserved = false; // Vrati termin kao slobodan
     await slot.save();
     // Pošalji email korisniku
-    try {
-      const emailData = {
-        Messages: [
-          {
-            From: {
-              Email: process.env.MAIL_FROM_EMAIL || 'termino@playgroundapp.com',
-              Name: 'Termino - Playground App'
-            },
-            To: [
-              {
-                Email: user.email,
-                Name: user.name
-              }
-            ],
-            Subject: 'Rezervacija odbijena',
-            HTMLPart: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #dc3545;">Rezervacija odbijena</h2>
-                <p>Nažalost, vaša rezervacija nije mogla biti potvrđena.</p>
-                <div style="background-color: #f8d7da; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #dc3545;">
-                  <h3 style="color: #721c24; margin-top: 0;">Detalji rezervacije:</h3>
-                  <p><strong>Datum:</strong> ${slot.date}</p>
-                  <p><strong>Vreme:</strong> ${slot.timeFrom} - ${slot.timeTo}</p>
-                  <p><strong>Igraonica:</strong> ${playground.name}</p>
+    if (client) {
+      try {
+        const emailData = {
+          Messages: [
+            {
+              From: {
+                Email: process.env.MAIL_FROM_EMAIL || 'termino@playgroundapp.com',
+                Name: 'Termino - Playground App'
+              },
+              To: [
+                {
+                  Email: user.email,
+                  Name: user.name
+                }
+              ],
+              Subject: 'Rezervacija odbijena',
+              HTMLPart: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                  <h2 style="color: #dc3545;">Rezervacija odbijena</h2>
+                  <p>Nažalost, vaša rezervacija nije mogla biti potvrđena.</p>
+                  <div style="background-color: #f8d7da; padding: 20px; margin: 20px 0; border-radius: 8px; border-left: 4px solid #dc3545;">
+                    <h3 style="color: #721c24; margin-top: 0;">Detalji rezervacije:</h3>
+                    <p><strong>Datum:</strong> ${slot.date}</p>
+                    <p><strong>Vreme:</strong> ${slot.timeFrom} - ${slot.timeTo}</p>
+                    <p><strong>Igraonica:</strong> ${playground.name}</p>
+                  </div>
+                  <p>Molimo pokušajte sa drugim terminom.</p>
+                  <hr style="margin: 30px 0;">
+                  <p style="color: #666; font-size: 12px;">Termino - Playground App</p>
                 </div>
-                <p>Molimo pokušajte sa drugim terminom.</p>
-                <hr style="margin: 30px 0;">
-                <p style="color: #666; font-size: 12px;">Termino - Playground App</p>
-              </div>
-            `,
-            TextPart: `Vaša rezervacija termina za ${slot.date} od ${slot.timeFrom}h do ${slot.timeTo}h u igraonici ${playground.name} je ODBIJENA.`
-          }
-        ]
+              `,
+              TextPart: `Vaša rezervacija termina za ${slot.date} od ${slot.timeFrom}h do ${slot.timeTo}h u igraonici ${playground.name} je ODBIJENA.`
+            }
+          ]
+        };
+        
+        const result = await client.post('send', { version: 'v3.1' }).request(emailData);
+        console.log('✅ Email korisniku poslat uspešno!');
+        console.log('Message ID:', result.body.Messages[0].To[0].MessageID);
+      } catch (error) {
+        console.error('❌ Greška pri slanju emaila korisniku:', error);
+      }
+    } else {
+      console.error('⚠️ Mailjet klijent nije dostupan - email nije poslat korisniku');
+    }
+    // Pošalji OneSignal push notifikaciju korisniku
+    console.log(`🔍 User PlayerID (reject): ${user.playerId || 'NEMA'}`);
+    if (user.playerId) {
+      const title = 'Rezervacija odbijena';
+      const message = `Nažalost, vaša rezervacija za ${slot.date} od ${slot.timeFrom}-${slot.timeTo} u ${playground.name} je ODBIJENA.`;
+      const data = {
+        reservationId: reservation.id,
+        playgroundId: playground.id,
+        slotId: slot.id,
+        type: 'reservation_rejected'
       };
       
-      const result = await client.post('send', { version: 'v3.1' }).request(emailData);
-      console.log('✅ Email korisniku poslat uspešno!');
-      console.log('Message ID:', result.body.Messages[0].To[0].MessageID);
-    } catch (error) {
-      console.error('❌ Greška pri slanju emaila korisniku:', error);
-    }
-    // OneSignal push korisniku
-    if (user.playerId) {
-      try {
-        await axios.post('https://onesignal.com/api/v1/notifications', {
-          app_id: process.env.ONESIGNAL_APP_ID,
-          include_player_ids: [user.playerId],
-          contents: { en: `Vaša rezervacija za ${slot.date} ${slot.timeFrom}h-${slot.timeTo}h u ${playground.name} je ODBIJENA.` }
-        }, {
-          headers: {
-            'Authorization': `Basic ${process.env.ONESIGNAL_API_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        });
-      } catch (error) {
-        console.error('Greška pri slanju push notifikacije korisniku:', error);
-      }
+      console.log(`📱 Šaljem OneSignal notifikaciju korisniku (reject): ${user.playerId}`);
+      await sendOneSignalNotification(user.playerId, title, message, data);
+    } else {
+      console.log('⚠️ User nema playerId - push notifikacija nije poslata (reject)');
+      console.log('💡 Korisnik mora da se uloguje u aplikaciju da bi dobio playerId');
     }
     // Ažuriraj originalnu notifikaciju vlasnika
     await Notification.update(

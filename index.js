@@ -8,6 +8,7 @@ const slotRoutes = require('./routes/slots');
 const reservationRoutes = require('./routes/reservations');
 const notificationRoutes = require('./routes/notifications');
 const nonWorkingDayRoutes = require('./routes/nonWorkingDays');
+const adminRoutes = require('./routes/admin');
 const dbCheckMiddleware = require('./middleware/dbCheck');
 
 const app = express();
@@ -122,9 +123,33 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// Health check endpoint za API (konzistentno sa ostalim rutama)
+app.get('/api/health', async (req, res) => {
+  try {
+    await sequelize.authenticate();
+    res.status(200).json({
+      status: 'ok',
+      server: 'running',
+      database: 'connected',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime()
+    });
+  } catch (error) {
+    res.status(200).json({
+      status: 'degraded',
+      server: 'running',
+      database: 'disconnected',
+      error: error.message,
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime()
+    });
+  }
+});
+
 app.use('/api/auth', dbCheckMiddleware, authRoutes);
 app.use('/api/playgrounds', dbCheckMiddleware, playgroundRoutes);
 app.use('/api/slots', dbCheckMiddleware, slotRoutes);
 app.use('/api/reservations', dbCheckMiddleware, reservationRoutes);
 app.use('/api/notifications', dbCheckMiddleware, notificationRoutes);
 app.use('/api/non-working-days', dbCheckMiddleware, nonWorkingDayRoutes);
+app.use('/api/admin', adminRoutes);

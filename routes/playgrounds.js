@@ -164,9 +164,9 @@ router.get('/:id', async (req, res) => {
 router.post('/', auth, async (req, res) => {
   try {
     if (req.user.type !== 'owner') return res.status(403).json({ message: 'Samo vlasnici mogu dodavati igraonice.' });
-    const { name, description, images, location, city, prices, capacity, price, slotDuration, slotTemplates, latitude, longitude, phone } = req.body;
+    const { name, description, images, location, city, prices, capacity, price, slotDuration, slotTemplates, latitude, longitude, phone, numberOfAnimators, allowOwnFood, allowOwnDrinks, offerings } = req.body;
     const playground = await Playground.create({
-      name, description, images, location, city, prices, capacity, price, slotDuration, ownerId: req.user.id, slotTemplates, latitude, longitude, phone
+      name, description, images, location, city, prices, capacity, price, slotDuration, ownerId: req.user.id, slotTemplates, latitude, longitude, phone, numberOfAnimators, allowOwnFood, allowOwnDrinks, offerings
     });
 
     // Automatsko kreiranje slotova za celu godinu
