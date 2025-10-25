@@ -3,7 +3,7 @@ const { Slot, Playground } = require('./models');
 const router = express.Router();
 
 // Admin endpoint za čišćenje slotova za Dekiland
-router.post('/admin/cleanup-dekiland-slots', async (req, res) => {
+router.post('/cleanup-dekiland-slots', async (req, res) => {
   try {
     console.log('🔧 Počinje čišćenje Dekiland slotova...');
     
