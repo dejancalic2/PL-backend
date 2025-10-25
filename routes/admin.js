@@ -1,5 +1,5 @@
 const express = require('express');
-const { Slot, Playground } = require('./models');
+const { Slot, Playground } = require('../models');
 const router = express.Router();
 
 // Admin endpoint za čišćenje slotova za Dekiland
