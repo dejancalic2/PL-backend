@@ -1,6 +1,26 @@
 const express = require('express');
-const { Slot, Playground } = require('../models');
+const { Slot, Playground, User, Reservation } = require('../models');
+const auth = require('../middleware/auth');
+const adminOnly = require('../middleware/adminOnly');
 const router = express.Router();
+
+// SVE admin rute zaštićene
+router.use(auth, adminOnly);
+
+// Osnovni pregled stanja (brojači)
+router.get('/overview', async (req, res) => {
+  try {
+    const [users, playgrounds, reservations, slots] = await Promise.all([
+      User.count(),
+      Playground.count(),
+      Reservation.count(),
+      Slot.count(),
+    ]);
+    res.json({ users, playgrounds, reservations, slots });
+  } catch (error) {
+    res.status(500).json({ message: 'Greška pri dohvatanju pregleda', error: error.message });
+  }
+});
 
 // Admin endpoint za čišćenje slotova za Dekiland
 router.post('/cleanup-dekiland-slots', async (req, res) => {

@@ -64,37 +64,53 @@ async function sendOneSignalNotification(playerId, title, message, data = {}) {
 
 // Rezervacija termina (korisnik ili vlasnik)
 router.post('/:slotId', auth, async (req, res) => {
-  const slot = await Slot.findByPk(req.params.slotId);
-  if (!slot || slot.isReserved || slot.isTemporarilyReserved || slot.isDisabled) {
-    return res.status(400).json({ message: 'Termin nije dostupan.' });
-  }
-  
-  // Označi termin kao privremeno rezervisan
-  slot.isTemporarilyReserved = true;
-  await slot.save();
-  
-  // Kreiraj rezervaciju sa statusom 'pending'
-  const reservation = await Reservation.create({ 
-    userId: req.user.id, 
-    slotId: slot.id, 
-    note: req.body.note, 
-    numberOfAnimators: req.body.numberOfAnimators || 1, // Broj animatorki (default: 1)
-    status: 'pending' 
-  });
+  try {
+    const slot = await Slot.findByPk(req.params.slotId);
+    if (!slot) {
+      return res.status(404).json({ message: 'Termin nije pronađen.' });
+    }
+    
+    if (slot.isReserved || slot.isTemporarilyReserved || slot.isDisabled) {
+      return res.status(400).json({ message: 'Termin nije dostupan.' });
+    }
+    
+    // Označi termin kao privremeno rezervisan
+    slot.isTemporarilyReserved = true;
+    await slot.save();
+    
+    // Kreiraj rezervaciju sa statusom 'pending'
+    const reservation = await Reservation.create({ 
+      userId: req.user.id, 
+      slotId: slot.id, 
+      note: req.body.note, 
+      numberOfAnimators: req.body.numberOfAnimators || 1, // Broj animatorki (default: 1)
+      status: 'pending' 
+    });
 
-  // Pronađi korisnika i vlasnika
-  const user = await User.findByPk(req.user.id);
-  const playground = await Playground.findByPk(slot.playgroundId, { include: [{ model: User, as: 'owner' }] });
-  const owner = playground.owner;
-  
-  console.log(`🔍 User ID: ${user.id}, Player ID: ${user.playerId}`);
-  console.log(`🔍 Owner ID: ${owner.id}, Player ID: ${owner.playerId}`);
+    // Pronađi korisnika i vlasnika
+    const user = await User.findByPk(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'Korisnik nije pronađen.' });
+    }
+    
+    const playground = await Playground.findByPk(slot.playgroundId, { include: [{ model: User, as: 'owner' }] });
+    if (!playground) {
+      return res.status(404).json({ message: 'Igraonica nije pronađena.' });
+    }
+    
+    const owner = playground.owner;
+    if (!owner) {
+      return res.status(404).json({ message: 'Vlasnik igraonice nije pronađen.' });
+    }
+    
+    console.log(`🔍 User ID: ${user.id}, Player ID: ${user.playerId}`);
+    console.log(`🔍 Owner ID: ${owner.id}, Player ID: ${owner.playerId}`);
 
-  // Slanje emaila vlasniku preko Mailjet
-  const client = getMailjetClient();
+    // Slanje emaila vlasniku preko Mailjet
+    const client = getMailjetClient();
   
-  const emailData = {
-    Messages: [
+    const emailData = {
+      Messages: [
       {
         From: {
           Email: process.env.MAIL_FROM_EMAIL || 'termino@playgroundapp.com',
@@ -127,57 +143,82 @@ router.post('/:slotId', auth, async (req, res) => {
         `,
         TextPart: `Korisnik ${user.name} (${user.email}${user.phone ? ', tel: ' + user.phone : ''}) je rezervisao termin za ${slot.date} od ${slot.timeFrom} do ${slot.timeTo} u igraonici ${playground.name}. Potvrdite ili odbijte rezervaciju u aplikaciji.`
       }
-    ]
-  };
-  
-  if (client) {
-    try {
-      const result = await client.post('send', { version: 'v3.1' }).request(emailData);
-      console.log('✅ Email vlasniku poslat uspešno!');
-      console.log('Message ID:', result.body.Messages[0].To[0].MessageID);
-    } catch (error) {
-      console.error('❌ Greška pri slanju emaila vlasniku:', error);
-    }
-  } else {
-    console.error('⚠️ Mailjet klijent nije dostupan - email nije poslat');
-  }
-
-  // Pošalji OneSignal push notifikaciju owner-u
-  console.log(`🔍 Owner ID: ${owner.id}, Player ID: ${owner.playerId || 'NEMA'}`);
-  if (owner.playerId) {
-    const title = 'Nova rezervacija termina';
-    const message = `${user.name} je rezervisao termin za ${slot.date} od ${slot.timeFrom}-${slot.timeTo}`;
-    const data = {
-      reservationId: reservation.id,
-      playgroundId: playground.id,
-      slotId: slot.id,
-      type: 'new_reservation'
+      ]
     };
     
-    console.log(`📱 Šaljem OneSignal notifikaciju owner-u: ${owner.playerId}`);
-    console.log(`   Title: ${title}`);
-    console.log(`   Message: ${message}`);
-    try {
-      await sendOneSignalNotification(owner.playerId, title, message, data);
-      console.log('✅ OneSignal notifikacija owner-u poslata uspešno');
-    } catch (error) {
-      console.error('❌ Greška pri slanju OneSignal notifikacije owner-u:', error);
+    if (client) {
+      try {
+        const result = await client.post('send', { version: 'v3.1' }).request(emailData);
+        console.log('✅ Email vlasniku poslat uspešno!');
+        console.log('Message ID:', result.body.Messages[0].To[0].MessageID);
+      } catch (error) {
+        console.error('❌ Greška pri slanju emaila vlasniku:', error);
+      }
+    } else {
+      console.error('⚠️ Mailjet klijent nije dostupan - email nije poslat');
     }
-  } else {
-    console.log('⚠️ Owner nema playerId - push notifikacija nije poslata');
-    console.log('💡 Owner mora da se uloguje u aplikaciju da bi dobio playerId');
+
+    // Pošalji OneSignal push notifikaciju owner-u
+    console.log(`🔍 Owner ID: ${owner.id}, Player ID: ${owner.playerId || 'NEMA'}`);
+    if (owner.playerId) {
+      const title = 'Nova rezervacija termina';
+      const message = `${user.name} je rezervisao termin za ${slot.date} od ${slot.timeFrom}-${slot.timeTo}`;
+      const data = {
+        reservationId: reservation.id,
+        playgroundId: playground.id,
+        slotId: slot.id,
+        type: 'new_reservation'
+      };
+    
+      console.log(`📱 Šaljem OneSignal notifikaciju owner-u: ${owner.playerId}`);
+      console.log(`   Title: ${title}`);
+      console.log(`   Message: ${message}`);
+      try {
+        await sendOneSignalNotification(owner.playerId, title, message, data);
+        console.log('✅ OneSignal notifikacija owner-u poslata uspešno');
+      } catch (error) {
+        console.error('❌ Greška pri slanju OneSignal notifikacije owner-u:', error);
+      }
+    } else {
+      console.log('⚠️ Owner nema playerId - push notifikacija nije poslata');
+      console.log('💡 Owner mora da se uloguje u aplikaciju da bi dobio playerId');
+    }
+
+    // Upis notifikacije u bazu
+    try {
+      await Notification.create({
+        ownerId: owner.id,
+        message: `Nova rezervacija (čeka potvrdu): ${user.name} (${user.email}${user.phone ? ', tel: ' + user.phone : ''}) za ${slot.date} ${slot.timeFrom}h-${slot.timeTo}h u ${playground.name}.`,
+        reservationId: reservation.id
+      });
+      console.log('✅ Notifikacija u bazu upisana uspešno');
+    } catch (error) {
+    // Ne baci grešku - rezervacija je već kreirana i response će biti poslat
+    // Samo loguj grešku, ali ne prekini tok
+    console.error('❌ Greška pri kreiranju notifikacije u bazi:', error);
+    console.error('   Rezervacija je ipak kreirana uspešno (ID: ' + reservation.id + ')');
   }
 
-  // Upis notifikacije u bazu
-  await Notification.create({
-    ownerId: owner.id,
-    message: `Nova rezervacija (čeka potvrdu): ${user.name} (${user.email}${user.phone ? ', tel: ' + user.phone : ''}) za ${slot.date} ${slot.timeFrom}h-${slot.timeTo}h u ${playground.name}.`,
-    reservationId: reservation.id
-  });
+    // Duplikat OneSignal poziva je uklonjen - koristi se samo sendOneSignalNotification funkcija iznad
 
-  // Duplikat OneSignal poziva je uklonjen - koristi se samo sendOneSignalNotification funkcija iznad
-
-  res.status(201).json(reservation);
+    res.status(201).json(reservation);
+  } catch (error) {
+    console.error('❌ Greška pri kreiranju rezervacije:', error);
+    console.error('   Stack:', error.stack);
+    
+    // Ako je response već poslat, samo loguj grešku
+    if (res.headersSent) {
+      console.error('   ⚠️ Response već poslat, ne mogu slati error response');
+      return;
+    }
+    
+    // Vrati JSON error response umesto dungeon Express default HTML-a
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: 'Došlo je do greške pri kreiranju rezervacije',
+      ...(process.env.NODE_ENV === 'development' && { details: error.message })
+    });
+  }
 });
 
 // Owner potvrđuje ili odbija rezervaciju
